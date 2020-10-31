@@ -130,6 +130,11 @@ class ScrollPhatHdDisplayThread(threading.Thread):
             scroll_calls = 0
 
         for i in range(scroll_calls):
+            # Quick exit when new metadata is available
+            if self.metadata_update_pending:
+                scrollphathd.clear()
+                scrollphathd.show()
+                return
             scrollphathd.scroll()
             scrollphathd.show()
             time.sleep(0.1)
