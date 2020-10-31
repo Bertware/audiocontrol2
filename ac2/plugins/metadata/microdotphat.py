@@ -23,6 +23,7 @@ class MetadataMicroDotPhatDisplay(MetadataDisplay):
 
     def notify(self, metadata):
         if self.current_metadata is not None \
+                and metadata.playerState == self.current_metadata.playerState \
                 and metadata.playerName == self.current_metadata.playerName \
                 and metadata.artist == self.current_metadata.artist \
                 and metadata.title == self.current_metadata.title:
@@ -91,6 +92,11 @@ class MicroDotPhatDisplayThread(threading.Thread):
                     player_text = player_text.upper()
                     scrolling_text = scrolling_text.upper()
                     self.metadata_update_pending = False
+
+                # Empty display when not playing
+                if self.metadata.playerState != "playing":
+                    time.sleep(1)
+                    continue
 
                 self.display_static(player_text, duration=5)
                 self.display_scrolling(scrolling_text)
