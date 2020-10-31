@@ -13,7 +13,7 @@ class MetadataMicroDotPhatDisplay(MetadataDisplay):
 
     def __init__(self, display_player=True, display_artist=True, display_title=True, brightness=0.5):
         super().__init__()
-        logging.error("MetadataMicroDotPhatDisplay INITIALIZING")
+        self.current_metadata = None
         self.display_thread = MicroDotPhatDisplayThread(display_player, display_artist, display_title, brightness)
         self.display_thread.start()
 
@@ -22,11 +22,16 @@ class MetadataMicroDotPhatDisplay(MetadataDisplay):
             self.display_thread.exit()
 
     def notify(self, metadata):
-        print(metadata)
+        if self.current_metadata is not None \
+                and metadata.playerName == self.current_metadata.playerName \
+                and metadata.artist == self.current_metadata.artist \
+                and metadata.title == self.current_metadata.title:
+            return
+        self.current_metadata = metadata
         self.display_thread.set_metadata(metadata)
 
     def __str__(self):
-        return "http"
+        return "MetadataMicroDotPhatDisplay"
 
 
 class MicroDotPhatDisplayThread(threading.Thread):
@@ -53,7 +58,7 @@ class MicroDotPhatDisplayThread(threading.Thread):
     def run(self):
         player_text = ""
         scrolling_text = ""
-        logging.error("MICRODOTPHAT DISPLAY THREAD START")
+        logging.info("MICRODOTPHAT DISPLAY THREAD START")
 
         # Show clearly that the display has been enabled
         microdotphat.fill(1)
@@ -87,8 +92,10 @@ class MicroDotPhatDisplayThread(threading.Thread):
                     scrolling_text = scrolling_text.upper()
                     self.metadata_update_pending = False
 
-                self.display_static(player_text, duration=10)
-                self.display_scrolling(scrolling_text, loops=2)
+                self.display_static(player_text, duration=5)
+                self.display_scrolling(scrolling_text)
+                self.display_scrolling(scrolling_text)
+
             except Exception as e:
                 logging.error("MICRODOTPHAT DISPLAY THREAD EXCEPTION ", e)
         logging.info("MICRODOTPHAT DISPLAY THREAD DONE")
@@ -107,18 +114,9 @@ class MicroDotPhatDisplayThread(threading.Thread):
         microdotphat.clear()
         microdotphat.show()
 
-    def display_scrolling(self, scrolling_text, loops=1):
+    def display_scrolling(self, scrolling_text):
         if not scrolling_text:
             return
-
-        display_text = scrolling_text
-        # Loop the text a number of times
-        if loops > 1:
-            for i in range(1, loops):
-                display_text += "    " + scrolling_text
-
-        if len(display_text) < 6:
-            display_text = display_text.ljust(6, " ")
 
         microdotphat.clear()
         microdotphat.set_brightness(self.brightness)
@@ -134,9 +132,14 @@ class MicroDotPhatDisplayThread(threading.Thread):
             scroll_calls = 0
 
         microdotphat.show()
-        for i in range(scroll_calls):
+        # + 1 since we also need to show offset 0 for the initial text
+        for i in range(scroll_calls+1):
             microdotphat.clear()
-            microdotphat.write_string(display_text[i:i+7], kerning=False)
+            # Stop showing the current text if there is new data available
+            if self.metadata_update_pending:
+                microdotphat.show()
+                return
+            microdotphat.write_string(scrolling_text[i:], kerning=False)
             microdotphat.show()
             time.sleep(0.6)
         # Sleep two seconds after the loop for better readability
