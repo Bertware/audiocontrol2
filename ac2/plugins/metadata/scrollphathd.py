@@ -65,7 +65,7 @@ class ScrollPhatHdDisplayThread(threading.Thread):
         time.sleep(0.5)
         scrollphathd.clear()
         scrollphathd.show()
-        scrollphathd.write_string("READY!", y=1, font=font3x5)
+        scrollphathd.write_string("READY!", y=1, font=font3x5, brightness=self.brightness)
         scrollphathd.show()
         time.sleep(1)
         scrollphathd.clear()
@@ -104,7 +104,6 @@ class ScrollPhatHdDisplayThread(threading.Thread):
     def display_static(self, static_text, duration=10):
         if not static_text:
             return
-        logging.error("DISPLAYING STATIC TEXT: " + static_text)
         scrollphathd.write_string(static_text, y=1, font=font3x5, brightness=self.brightness)
         scrollphathd.show()
         time.sleep(duration)
