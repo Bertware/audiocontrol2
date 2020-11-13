@@ -11,7 +11,7 @@ from json import dumps
 
 class MetadataMicroDotPhatDisplay(MetadataDisplay):
     '''
-    Show metadata on a Pimoroni Micro Dot pHat 6 character display where each character is 8x5
+    Show metadata on a Pimoroni Micro Dot pHat 6 character display where each character is 8x5 pixels
     '''
 
     def __init__(self, params):
@@ -35,11 +35,13 @@ class MetadataMicroDotPhatDisplay(MetadataDisplay):
         # Only enable this plugin if the microdot pHAT hardware is connected
         if not self.enabled:
             return
+        logging.critical(metadata)
         if self.current_metadata is not None \
                 and metadata.playerState == self.current_metadata.playerState \
                 and metadata.playerName == self.current_metadata.playerName \
                 and metadata.artist == self.current_metadata.artist \
                 and metadata.title == self.current_metadata.title:
+            logging.critical(self.current_metadata)
             return
         self.display_thread_comm_queue.put(metadata)
         self.current_metadata = metadata
@@ -86,17 +88,13 @@ class MicroDotPhatDisplayThread(threading.Thread):
     def run(self):
         player_text = ""
         scrolling_text = ""
-        logging.info("MICRODOTPHAT DISPLAY THREAD START")
+        logging.info("Microdotphat display thread started")
 
         # Show clearly that the display has been enabled
         microdotphat.fill(1)
         microdotphat.show()
         time.sleep(0.5)
-        for word in ("READY", "TO", "PLAY"):
-            microdotphat.clear()
-            microdotphat.write_string(word, kerning=False)
-            microdotphat.show()
-            time.sleep(0.5)
+        self.display_scrolling("Ready to play!")
         microdotphat.clear()
         microdotphat.show()
 
@@ -119,10 +117,11 @@ class MicroDotPhatDisplayThread(threading.Thread):
 
                     player_text = player_text.upper()
                     scrolling_text = scrolling_text.upper()
-                    self.metadata_update_pending = False
 
                 # Empty display when not playing
                 if not self.metadata or self.metadata.playerState != "playing":
+                    microdotphat.clear()
+                    microdotphat.show()
                     time.sleep(1)
                     continue
 
@@ -132,21 +131,25 @@ class MicroDotPhatDisplayThread(threading.Thread):
                 self.display_scrolling(scrolling_text)
 
             except Exception as e:
-                logging.error("MICRODOTPHAT DISPLAY THREAD EXCEPTION ", e.args)
-        logging.info("MICRODOTPHAT DISPLAY THREAD DONE")
+                logging.error("Microdotphat display thread encounterd an exception ", e.args)
+        logging.info("MMicrodotphat display thread finished")
         microdotphat.clear()
         microdotphat.show()
 
     def display_static(self, static_text, duration=10):
         if not static_text or self.is_metadata_update_pending():
             return
-        logging.error("DISPLAYING STATIC TEXT: " + static_text)
         microdotphat.clear()
         microdotphat.set_brightness(self.brightness)
         microdotphat.write_string(static_text, kerning=False)
         microdotphat.show()
-        time.sleep(duration)
+        # Clear the buffer already, but leave the text on the display
         microdotphat.clear()
+        for i in range(duration):
+            # This makes the display more responsive to metadata changes
+            if self.is_metadata_update_pending():
+                return
+            time.sleep(1)
 
     def display_scrolling(self, scrolling_text):
         if not scrolling_text or self.is_metadata_update_pending():
@@ -177,5 +180,4 @@ class MicroDotPhatDisplayThread(threading.Thread):
         # Sleep two seconds after the loop for better readability
         if not self.is_metadata_update_pending():
             time.sleep(1.8)
-
         microdotphat.clear()
