@@ -1,12 +1,11 @@
-from ac2.plugins.metadata import MetadataDisplay
-from ac2.metadata import Metadata
-import microdotphat
-import time
-import threading
 import logging
+import threading
+import time
 from queue import SimpleQueue
-from smbus import SMBus
-from json import dumps
+
+import microdotphat
+
+from ac2.plugins.metadata import MetadataDisplay
 
 
 class MicroDotPhatMetadataDisplay(MetadataDisplay):
@@ -152,8 +151,8 @@ class MicroDotPhatDisplayThread(threading.Thread):
                     self.aware_sleep(1)
                     continue
 
-                if not scrolling_text:
-                    self.display_static(player_text, duration=5)
+                #if not scrolling_text:
+                self.display_static(player_text, duration=10)
                 self.display_scrolling(scrolling_text)
                 self.display_scrolling(scrolling_text)
 
@@ -197,14 +196,14 @@ class MicroDotPhatDisplayThread(threading.Thread):
             microdotphat.write_string(scrolling_text[i:], kerning=False)
             microdotphat.show()
             if i == 0:
-                self.aware_sleep(6 * 0.3)
+                self.aware_sleep(4 * 0.2)
             else:
-                self.aware_sleep(0.3)
+                self.aware_sleep(0.2)
         # Sleep two seconds after the loop for better readability
         self.aware_sleep(1.8)
         microdotphat.clear()
 
-    def aware_sleep(self, duration_seconds : float):
+    def aware_sleep(self, duration_seconds: float):
         '''
         Sleep, but skip as soon as there is a change in the data.
         '''
