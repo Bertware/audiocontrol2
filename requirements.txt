@@ -7,3 +7,4 @@ python-Levenshtein
 musicbrainzngs
 python-mpd2
 microdotphat
+scrollphathd
