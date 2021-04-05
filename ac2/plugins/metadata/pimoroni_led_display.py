@@ -4,14 +4,12 @@ import time
 from queue import SimpleQueue
 
 import microdotphat
+import scrollphathd
 
 from ac2.plugins.metadata import MetadataDisplay
 
 
-class MicroDotPhatMetadataDisplay(MetadataDisplay):
-    '''
-    Show metadata on a Pimoroni Micro Dot pHat 6 character display where each character is 8x5 pixels
-    '''
+class PimoroniMetadataDisplay(MetadataDisplay):
 
     def __init__(self, params):
         super().__init__()
@@ -24,9 +22,7 @@ class MicroDotPhatMetadataDisplay(MetadataDisplay):
         self.current_metadata = None
         self.display_thread_metadata_queue = SimpleQueue()
         self.display_thread_volume_queue = SimpleQueue()
-        self.display_thread = MicroDotPhatDisplayThread(self.display_thread_metadata_queue,
-                                                        self.display_thread_volume_queue,
-                                                        True, True, True, 0.5)
+        self.display_thread = self.get_async_display_manager()
         self.display_thread.start()
 
     def __del__(self):
@@ -53,15 +49,51 @@ class MicroDotPhatMetadataDisplay(MetadataDisplay):
         # volume change
         self.display_thread_volume_queue.put(volume_level)
 
-    @staticmethod
-    def is_hardware_present():
-        return microdotphat.is_connected()
+    def is_hardware_present(self):
+        return False  # Implement this in actual display class.
+
+    def get_async_display_manager(self):
+        pass  # Implement this in the actual display class.
 
     def __str__(self):
-        return "MicroDotPhatMetadataDisplay " + "(enabled)" if self.enabled else "(disabled)"
+        return "PimoroniMetadataDisplay " + "(enabled)" if self.enabled else "(disabled)"
 
 
-class MicroDotPhatDisplayThread(threading.Thread):
+class ScrollphatHdDisplay(PimoroniMetadataDisplay):
+    """
+    Show metadata on a Pimoroni Scroll pHat HD 17x7 led display
+    """
+
+    def is_hardware_present(self):
+        return ScrollPhatHdDisplayManager.is_hardware_present()
+
+    def get_async_display_manager(self):
+        return ScrollPhatHdDisplayManager(self.display_thread_metadata_queue,
+                                          self.display_thread_volume_queue,
+                                          True, True, True, 0.5)
+
+    def __str__(self):
+        return "ScrollphatHdDisplay, " + super(PimoroniMetadataDisplay).__str__()
+
+
+class MicrodotPhatDisplay(PimoroniMetadataDisplay):
+    """
+    Show metadata on a Pimoroni Micro Dot pHat 6 character display where each character is 8x5 pixels
+    """
+
+    def is_hardware_present(self):
+        return MicrodotPhatDisplayManager.is_hardware_present()
+
+    def get_async_display_manager(self):
+        return MicrodotPhatDisplayManager(self.display_thread_metadata_queue,
+                                          self.display_thread_volume_queue,
+                                          True, True, True, 0.5)
+
+    def __str__(self):
+        return "MicrodotPhatDisplay, " + super(PimoroniMetadataDisplay).__str__()
+
+
+class PimoroniDisplayManager(threading.Thread):
     def __init__(self, metadata_queue, volume_queue, display_playername, display_artist, display_title, brightness):
         threading.Thread.__init__(self)
         self.metadata_queue = metadata_queue
@@ -128,7 +160,7 @@ class MicroDotPhatDisplayThread(threading.Thread):
                     player_text = ""
 
                     if self.display_player and self.metadata.playerName:
-                        player_text += self.metadata.playerName
+                        player_text += self.metadata.playerName if self.metadata.playerName != "alsaloop" else "aux"
                     if self.display_artist and self.metadata.artist:
                         scrolling_text += self.metadata.artist
                     if self.display_artist and self.metadata.artist and self.display_title and self.metadata.title:
@@ -151,17 +183,35 @@ class MicroDotPhatDisplayThread(threading.Thread):
                     self.aware_sleep(1)
                     continue
 
-                #if not scrolling_text:
-                self.display_static(player_text, duration=10)
+                # if not scrolling_text:
                 self.display_scrolling(scrolling_text)
+                self.display_static(player_text, duration=10)
                 self.display_scrolling(scrolling_text)
 
             except Exception as e:
                 logging.error("Microdotphat display thread encounterd an exception ", e.args)
-        logging.info("MMicrodotphat display thread finished")
+        logging.info("Microdotphat display thread finished")
         microdotphat.clear()
         microdotphat.show()
 
+    def aware_sleep(self, duration_seconds: float):
+        """
+        Sleep, but skip as soon as there is a change in the data.
+        """
+        for i in range(round(duration_seconds * 10)):
+            if self.is_update_pending():
+                return
+            time.sleep(0.1)
+        return
+
+    def display_scrolling(self, text):
+        pass  # Implement in display classes.
+
+    def display_static(self, text, duration):
+        pass  # Implement in display classes.
+
+
+class MicrodotPhatDisplayManager(PimoroniDisplayManager):
     def display_static(self, static_text, duration=10):
         if not static_text or self.is_update_pending():
             return
@@ -203,12 +253,64 @@ class MicroDotPhatDisplayThread(threading.Thread):
         self.aware_sleep(1.8)
         microdotphat.clear()
 
-    def aware_sleep(self, duration_seconds: float):
-        '''
-        Sleep, but skip as soon as there is a change in the data.
-        '''
-        for i in range(round(duration_seconds * 10)):
+    def __del__(self):
+        microdotphat.clear()
+        microdotphat.show()
+
+    @staticmethod
+    def is_hardware_present():
+        return microdotphat.is_connected()
+
+
+class ScrollPhatHdDisplayManager(PimoroniDisplayManager):
+    def display_static(self, static_text, duration=10):
+        from scrollphathd.fonts import font3x5
+        if not static_text:
+            return
+        scrollphathd.write_string(static_text, y=1, font=font3x5, brightness=self.brightness)
+        scrollphathd.show()
+        self.aware_sleep(duration)
+        scrollphathd.clear()
+        scrollphathd.show()
+
+    def display_scrolling(self, scrolling_text):
+        from scrollphathd.fonts import font3x5
+        if not scrolling_text:
+            return
+
+        scrollphathd.write_string(scrolling_text, y=1, font=font3x5, brightness=self.brightness)
+        scrollphathd.show()
+        time.sleep(0.1)
+
+        # The font is 3x5 with one column as a space behind every character.
+        # scrollphathd.scroll() moves all text one pixel
+        # The total text length is 4 x length(scrolling_text), including spaces
+        # The first 17 columns fit on the display without scrolling
+        # The last space should not be scrolled
+        # This means that, in order to scroll one loop, we need to scroll
+        scroll_calls = 4 * len(scrolling_text) - 17 - 1
+        if scroll_calls < 0:
+            scroll_calls = 0
+
+        for i in range(scroll_calls):
+            # Quick exit when new metadata is available
             if self.is_update_pending():
+                scrollphathd.clear()
+                scrollphathd.show()
                 return
+            scrollphathd.scroll()
+            scrollphathd.show()
             time.sleep(0.1)
-        return
+        # Sleep two seconds after the loop for better readability
+        self.aware_sleep(2)
+
+        scrollphathd.clear()
+        scrollphathd.show()
+
+    @staticmethod
+    def is_hardware_present():
+        return scrollphathd.is_connected()
+
+    def __del__(self):
+        scrollphathd.clear()
+        scrollphathd.show()
