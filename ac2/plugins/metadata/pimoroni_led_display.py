@@ -1,6 +1,7 @@
 import logging
 import threading
 import time
+from datetime import datetime
 from queue import SimpleQueue
 
 import microdotphat
@@ -45,7 +46,7 @@ class PimoroniMetadataDisplay(MetadataDisplay):
         self.display_thread_metadata_queue.put(metadata)
         self.current_metadata = metadata
 
-    def update_volume(self, volume_level):
+    def notify_volume(self, volume_level):
         # volume change
         self.display_thread_volume_queue.put(volume_level)
 
@@ -59,7 +60,7 @@ class PimoroniMetadataDisplay(MetadataDisplay):
         return "PimoroniMetadataDisplay " + "(enabled)" if self.enabled else "(disabled)"
 
 
-class ScrollphatHdDisplay(PimoroniMetadataDisplay):
+class ScrollpHatHdDisplay(PimoroniMetadataDisplay):
     """
     Show metadata on a Pimoroni Scroll pHat HD 17x7 led display
     """
@@ -70,13 +71,13 @@ class ScrollphatHdDisplay(PimoroniMetadataDisplay):
     def get_async_display_manager(self):
         return ScrollPhatHdDisplayManager(self.display_thread_metadata_queue,
                                           self.display_thread_volume_queue,
-                                          True, True, True, 0.5)
+                                          True, True, True, 0.6)
 
     def __str__(self):
         return "ScrollphatHdDisplay, " + super(PimoroniMetadataDisplay).__str__()
 
 
-class MicrodotPhatDisplay(PimoroniMetadataDisplay):
+class MicrodotpHatDisplay(PimoroniMetadataDisplay):
     """
     Show metadata on a Pimoroni Micro Dot pHat 6 character display where each character is 8x5 pixels
     """
@@ -107,8 +108,7 @@ class PimoroniDisplayManager(threading.Thread):
         self.active = True
 
     def __del__(self):
-        microdotphat.clear()
-        microdotphat.show()
+        self.display_clear()
 
     def is_metadata_update_pending(self):
         return not self.metadata_queue.empty()
@@ -141,15 +141,12 @@ class PimoroniDisplayManager(threading.Thread):
     def run(self):
         player_text = ""
         scrolling_text = ""
-        logging.info("Microdotphat display thread started")
+        logging.info("PimoroniDisplayManager thread started")
 
         # Show clearly that the display has been enabled
-        microdotphat.fill(1)
-        microdotphat.show()
-        time.sleep(0.5)
-        self.display_scrolling("Ready to play!")
-        microdotphat.clear()
-        microdotphat.show()
+        self.apply_brightness(self.brightness)
+        self.display_test()
+        self.display_clear()
 
         # Auto scroll using a while + time mechanism (no thread)
         while self.active:
@@ -160,7 +157,7 @@ class PimoroniDisplayManager(threading.Thread):
                     player_text = ""
 
                     if self.display_player and self.metadata.playerName:
-                        player_text += self.metadata.playerName if self.metadata.playerName != "alsaloop" else "aux"
+                        player_text += self.metadata.playerName if self.metadata.playerName != "alsaloop" else "analog"
                     if self.display_artist and self.metadata.artist:
                         scrolling_text += self.metadata.artist
                     if self.display_artist and self.metadata.artist and self.display_title and self.metadata.title:
@@ -173,26 +170,32 @@ class PimoroniDisplayManager(threading.Thread):
 
                 if self.is_volume_update_pending():
                     self.read_volume_queue()
-                    self.display_static(f"VOL{self.volume_level: 3}", duration=3)
+                    self.display_static(f"VOL{self.volume_level: 3}", duration_seconds=3)
                     continue
 
                 # Empty display when not playing
                 if not self.metadata or self.metadata.playerState != "playing":
-                    microdotphat.clear()
-                    microdotphat.show()
-                    self.aware_sleep(1)
+                    self.show_clock()
                     continue
 
                 # if not scrolling_text:
                 self.display_scrolling(scrolling_text)
-                self.display_static(player_text, duration=10)
+                self.display_static(player_text, duration_seconds=10)
                 self.display_scrolling(scrolling_text)
 
             except Exception as e:
                 logging.error("Microdotphat display thread encounterd an exception ", e.args)
         logging.info("Microdotphat display thread finished")
-        microdotphat.clear()
-        microdotphat.show()
+        self.display_clear()
+
+    def show_clock(self):
+        now = datetime.now()
+        current_time = now.strftime(" %H%M ")
+        # display_static will interrupt when an update is available
+        standard_brightness = self.brightness
+        self.apply_brightness(standard_brightness * 0.8)  # 80% brightness
+        self.display_static(current_time, 60 - now.second)
+        self.apply_brightness(standard_brightness)  # restore original brightness
 
     def aware_sleep(self, duration_seconds: float):
         """
@@ -205,23 +208,50 @@ class PimoroniDisplayManager(threading.Thread):
         return
 
     def display_scrolling(self, text):
+        """
+        Display a scrolling text, scrolling it once over the display. When a metadata change occurs,
+        this method should exit immediately (use aware_sleep).
+        """
         pass  # Implement in display classes.
 
-    def display_static(self, text, duration):
+    def display_static(self, text, duration_seconds):
+        """
+        Display a text for a given time. When a metadata change occurs,
+        this method should exit immediately (use aware_sleep).
+        """
         pass  # Implement in display classes.
+
+    def display_clear(self):
+        """
+        Clear the display and its buffer if needed.
+        """
+        pass  # Implement in display classes.
+
+    def display_test(self):
+        """
+        Test the display, for example by lighting up all pixels, so the user can see it works on power-on.
+        """
+        pass  # Implement in display classes
+
+    def apply_brightness(self, brightness):
+        """
+        Apply a given brightness, ranging 0...1 to the display.
+        """
+
+    def __del__(self):
+        self.display_clear()
 
 
 class MicrodotPhatDisplayManager(PimoroniDisplayManager):
-    def display_static(self, static_text, duration=10):
+    def display_static(self, static_text, duration_seconds=10):
         if not static_text or self.is_update_pending():
             return
         microdotphat.clear()
-        microdotphat.set_brightness(self.brightness)
         microdotphat.write_string(static_text, kerning=False)
         microdotphat.show()
         # Clear the buffer already, but leave the text on the display
         microdotphat.clear()
-        self.aware_sleep(duration)
+        self.aware_sleep(duration_seconds)
 
     def display_scrolling(self, scrolling_text):
         if not scrolling_text or self.is_update_pending():
@@ -253,9 +283,17 @@ class MicrodotPhatDisplayManager(PimoroniDisplayManager):
         self.aware_sleep(1.8)
         microdotphat.clear()
 
-    def __del__(self):
+    def display_clear(self):
         microdotphat.clear()
         microdotphat.show()
+
+    def display_test(self):
+        microdotphat.fill(1)
+        microdotphat.show()
+        time.sleep(0.5)
+
+    def apply_brightness(self, brightness):
+        microdotphat.set_brightness(brightness)
 
     @staticmethod
     def is_hardware_present():
@@ -263,15 +301,15 @@ class MicrodotPhatDisplayManager(PimoroniDisplayManager):
 
 
 class ScrollPhatHdDisplayManager(PimoroniDisplayManager):
-    def display_static(self, static_text, duration=10):
+    def display_static(self, static_text, duration_seconds=10):
         from scrollphathd.fonts import font3x5
         if not static_text:
             return
+        scrollphathd.clear()
         scrollphathd.write_string(static_text, y=1, font=font3x5, brightness=self.brightness)
         scrollphathd.show()
-        self.aware_sleep(duration)
-        scrollphathd.clear()
-        scrollphathd.show()
+        self.aware_sleep(duration_seconds)
+        self.display_clear()
 
     def display_scrolling(self, scrolling_text):
         from scrollphathd.fonts import font3x5
@@ -295,22 +333,27 @@ class ScrollPhatHdDisplayManager(PimoroniDisplayManager):
         for i in range(scroll_calls):
             # Quick exit when new metadata is available
             if self.is_update_pending():
-                scrollphathd.clear()
-                scrollphathd.show()
+                self.display_clear()
                 return
             scrollphathd.scroll()
             scrollphathd.show()
             time.sleep(0.1)
         # Sleep two seconds after the loop for better readability
         self.aware_sleep(2)
+        self.display_clear()
 
+    def display_clear(self):
         scrollphathd.clear()
         scrollphathd.show()
+
+    def display_test(self):
+        scrollphathd.fill(1)
+        scrollphathd.show()
+        time.sleep(0.5)
+
+    def apply_brightness(self, brightness):
+        scrollphathd.set_brightness(brightness)
 
     @staticmethod
     def is_hardware_present():
         return scrollphathd.is_connected()
-
-    def __del__(self):
-        scrollphathd.clear()
-        scrollphathd.show()
