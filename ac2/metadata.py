@@ -209,8 +209,9 @@ class Metadata:
         return "{}/{}".format(self.artist, self.title)
     
     def __str__(self):
-        return "{}: {} ({}) {}".format(self.artist, self.title,
-                                       self.albumTitle, self.artUrl)
+        return "[{}, {}] {}: {} ({}) {}".format(self.playerName, self.playerState,
+                                                self.artist, self.title,
+                                                self.albumTitle, self.artUrl)
 
 
 def enrich_metadata(metadata, callback=None):
@@ -228,21 +229,21 @@ def enrich_metadata(metadata, callback=None):
         try:
             musicbrainz.enrich_metadata(metadata)
         except Exception as e:
-            logging.warn("error when retrieving data from musicbrainz")
+            logging.warning("error when retrieving data from musicbrainz")
             logging.exception(e)
             
         # Then HiFiBerry MusicDB
         try:
             hifiberrydb.enrich_metadata(metadata)
         except Exception as e:
-            logging.warn("error when retrieving data from hifiberry db")
+            logging.warning("error when retrieving data from hifiberry db")
             logging.exception(e)
 
         # Then Last.FM
         try:
             lastfmdata.enrich_metadata(metadata)
         except Exception as e:
-            logging.warn("error when retrieving data from last.fm")
+            logging.warning("error when retrieving data from last.fm")
             logging.exception(e)
                 
         # try Fanart.TV, but without artist picture

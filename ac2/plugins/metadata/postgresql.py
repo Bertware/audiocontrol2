@@ -90,6 +90,9 @@ class MetadataPostgres(MetadataDisplay):
         self.currentmetadata = metadata
         self.starttimestamp = datetime.now()
 
+    def notify_volume(self, volume):
+        pass
+
     def write_metadata(self, songdict):
         try:
             if songdict is None:
@@ -115,7 +118,7 @@ class MetadataPostgres(MetadataDisplay):
             cur.close()
 
         except Exception as e:
-            logging.warn("can't write to database: %s", e)
+            logging.warning("can't write to database: %s", e)
             self.conn = None
 
     def db_connection(self):
@@ -130,10 +133,10 @@ class MetadataPostgres(MetadataDisplay):
                                              password=self.password,
                                              host=self.host)
             else:
-                logging.warn("username and/or password missing for db connection")
+                logging.warning("username and/or password missing for db connection")
 
         except Exception as e:
-            logging.warn("can't connect to postgresql: %s", e)
+            logging.warning("can't connect to postgresql: %s", e)
             self.conn = None
 
         return self.conn

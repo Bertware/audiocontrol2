@@ -82,6 +82,7 @@ class AudioController():
         self.metadata_lock = threading.Lock()
         self.volume_control = None
         self.metadata_processors = []
+        self.state_displays = []
         self.players={}
         self.mpris = MPRIS()
         self.mpris.connect_dbus()
@@ -96,6 +97,9 @@ class AudioController():
     def register_metadata_display(self, mddisplay):
         self.metadata_displays.append(mddisplay)
 
+    def register_state_display(self, statedisplay):
+        self.state_displays.append(statedisplay)
+
     def register_metadata_processor(self, mdproc):
         self.metadata_processors.append(mdproc)
 
@@ -104,7 +108,7 @@ class AudioController():
 
     def metadata_notify(self, metadata):
         if metadata.is_unknown() and metadata.playerState == "playing":
-            logging.error("Got empty metadata - what's wrong here? %s",
+            logging.warning("Metadata without artist, album or title - what's wrong here? %s",
                           metadata)
 
         for md in self.metadata_displays:
@@ -112,7 +116,7 @@ class AudioController():
                 logging.debug("metadata_notify: %s %s", md, metadata)
                 md.notify_async(copy.copy(metadata))
             except Exception as e:
-                logging.warn("could not notify %s: %s", md, e)
+                logging.warning("could not notify %s: %s", md, e)
                 logging.exception(e)
 
         self.metadata = metadata
@@ -123,7 +127,7 @@ class AudioController():
         Returns a list of MPRIS and non-MPRIS players
         """
         players=list(self.players.keys())+self.mpris.retrieve_players()
-        logging.info("players: %s",players)
+        logging.debug("players: %s",players)
         return players
         
 
@@ -224,7 +228,7 @@ class AudioController():
         logging.debug("received metadata update: %s", updates)
 
         if self.metadata is None:
-            logging.warn("ooops, got an update, but don't have metadata")
+            logging.warning("ooops, got an update, but don't have metadata")
             return
 
         if self.metadata.songId() != songId:
@@ -429,6 +433,8 @@ class AudioController():
                               previous_state, state)
                 if not metadata_notified:
                     self.metadata_notify(md)
+                for sd in self.state_displays:
+                    sd.update_playback_state(state)
 
             previous_state = state
 
@@ -455,7 +461,14 @@ class AudioController():
     def next(self):
         self.send_command(CMD_NEXT)
 
-    def playpause(self, pause=None):
+    def playpause(self, pause=None, ignore=None):
+        
+        if ignore is not None:
+            if self.active_player.lower() == ignore.lower():
+                logging.info("Got a playpquse request that should be ignored (%s)",
+                             ignore)
+                return
+        
         command = None
         if pause is None:
             if self.playing:
