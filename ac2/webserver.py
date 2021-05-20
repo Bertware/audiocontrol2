@@ -26,6 +26,7 @@ import json
 import copy
 import urllib.parse
 import pathlib
+import os
 
 from bottle import Bottle, static_file, request, response
 from expiringdict import ExpiringDict
@@ -35,19 +36,53 @@ from ac2.metadata import Metadata
 from ac2.plugins.metadata import MetadataDisplay
 
 
+class SystemControl():
+    def __init__(self):
+        pass
+
+    def version(self):
+        """Extract Hifiberry OS version."""
+        version = "00000000"
+        try:
+            with open('/etc/hifiberry.version') as version:
+                for line in version:
+                    version = line.rstrip()
+        except Exception:
+            version = "ERROR000"
+
+        return version
+
+    def getserial(self):
+        """Extract serial from cpuinfo file."""
+        cpuserial = "0000000000000000"
+        try:
+            with open('/proc/cpuinfo','r') as cpuinfo:
+                for line in cpuinfo:
+                    if line.startswith('Serial'):
+                        cpuserial = line[10:].rstrip()
+        except Exception:
+            cpuserial = "ERROR000000000"
+
+        return cpuserial
+
+    def poweroff(self):
+        return os.system('systemctl poweroff') == 0
 
 class AudioControlWebserver(MetadataDisplay):
 
     def __init__(self,
                  port=80,
                  host='0.0.0.0',
+                 authtoken=None,
                  debug=False):
         super().__init__()
         self.port = port
         self.host = host
         self.debug = debug
+        self.authtoken = authtoken
         self.bottle = Bottle()
         self.route()
+        self.system_control = SystemControl()
         self.player_control = None
         self.lastfm_network = None
         self.volume_control = None
@@ -60,6 +95,14 @@ class AudioControlWebserver(MetadataDisplay):
         self.notify(Metadata("Artist", "Title", "Album"))
 
         # Last.FM API to access additional track data
+
+    def validate_authtoken(self, request):
+        if self.authtoken is None:
+            return False
+
+        if "Authtoken" in request.headers and request.headers["Authtoken"] == self.authtoken:
+            return True
+        return False
 
     def route(self):
         self.bottle.route('/static/<filename>',
@@ -80,6 +123,9 @@ class AudioControlWebserver(MetadataDisplay):
         self.bottle.route('/api/player/<command>',
                           method="POST",
                           callback=self.playercontrol_handler)
+        self.bottle.route('/api/player/<command>/<ignore>',
+                          method="POST",
+                          callback=self.playercontrol_ignore_handler)
         self.bottle.route('/api/track/metadata',
                           method="GET",
                           callback=self.metadata_handler)
@@ -92,6 +138,12 @@ class AudioControlWebserver(MetadataDisplay):
         self.bottle.route('/api/volume',
                           method="POST",
                           callback=self.volume_post_handler)
+        self.bottle.route('/api/system/info',
+                          method="GET",
+                          callback=self.system_info_handler)
+        self.bottle.route('/api/system/<command>',
+                          method="POST",
+                          callback=self.system_handler)
 
     def startServer(self):
         self.bottle.run(port=self.port,
@@ -114,6 +166,18 @@ class AudioControlWebserver(MetadataDisplay):
     def playercontrol_handler(self, command):
         try:
             if not(self.send_command(command)):
+                response.status = 500
+                return "{} failed".format(command)
+
+        except Exception as e:
+            response.status = 500
+            return "{} failed with exception {}".format(command, e)
+
+        return "ok"
+    
+    def playercontrol_ignore_handler(self, command, ignore):
+        try:
+            if not(self.send_command(command, ignore=ignore)):
                 response.status = 500
                 return "{} failed".format(command)
 
@@ -159,6 +223,24 @@ class AudioControlWebserver(MetadataDisplay):
                 break
 
         return ({"playing": playing})
+
+    def system_handler(self, command):
+        if not self.validate_authtoken(request):
+            response.status = 403
+            return "Not authorized"
+
+        if command == "poweroff" and not self.system_control.poweroff():
+            response.status = 500
+            return "Could not poweroff"
+        else:
+            response.status = 501
+            return "Unknown command {}".format(command)
+
+    def system_info_handler(self):
+        return json.dumps({
+            "hifiberry OS": self.system_control.version(),
+            "rpi serial": self.system_control.getserial()
+        })
 
     def metadata_handler(self):
         print(self.metadata)
@@ -276,7 +358,7 @@ class AudioControlWebserver(MetadataDisplay):
                 metadata.artUrl = "artwork/" + key
                 self.artwork[key]=localfile
             else:
-                logging.warn("artwork file %s does not exist, removing artUrl (%s)",
+                logging.warning("artwork file %s does not exist, removing artUrl (%s)",
                              localfile,
                              metadata.artUrl)
                 metadata.artUrl=None
@@ -291,7 +373,7 @@ class AudioControlWebserver(MetadataDisplay):
         self.metadata = metadata
                
 
-    def update_volume(self, vol):
+    def notify_volume(self, vol):
         self.volume = vol
 
     def send_metadata_update(self, updates, song_id = None):
@@ -302,7 +384,7 @@ class AudioControlWebserver(MetadataDisplay):
                 logging.debug("sending update %s to %s", u, updates)
                 u.update_metadata_attributes(updates, song_id)
             except Exception as e:
-                logging.warn("couldn't send update to %s: %s", u, e)
+                logging.warning("couldn't send update to %s: %s", u, e)
 
     # ##
     # ## end metadata functions
@@ -328,7 +410,7 @@ class AudioControlWebserver(MetadataDisplay):
         logging.info("trying to activate %s", playername)
         return self.player_control.activate_player(playername)
 
-    def send_command(self, command, params=None):
+    def send_command(self, command, ignore=None, params=None):
         if command == "love":
             return self.love_track(True)
 
@@ -364,13 +446,13 @@ class AudioControlWebserver(MetadataDisplay):
                 elif command == "previous":
                     self.player_control.previous()
                 elif command == "play":
-                    self.player_control.playpause(pause=False)
+                    self.player_control.playpause(pause=False,ignore=ignore)
                 elif command == "pause":
-                    self.player_control.playpause(pause=True)
+                    self.player_control.playpause(pause=True,ignore=ignore)
                 elif command == "playpause":
-                    self.player_control.playpause(pause=None)
+                    self.player_control.playpause(pause=None,ignore=ignore)
                 elif command == "stop":
-                    self.player_control.stop()
+                    self.player_control.stop(ignore=ignore)
                 else:
                     logging.error("unknown command %s", command)
                     return False
@@ -390,7 +472,7 @@ class AudioControlWebserver(MetadataDisplay):
                 lover.love(love)
             except Exception as e:
                 ok = False
-                logging.warn("Could not love/unlove via %s: %s", lover, e)
+                logging.warning("Could not love/unlove via %s: %s", lover, e)
 
         if ok:
             self.send_metadata_update({"loved": love})

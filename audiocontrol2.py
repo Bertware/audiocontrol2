@@ -125,7 +125,8 @@ def parse_config(debugmode=False):
         port = config.getint("webserver",
                              "port",
                              fallback=80)
-        server = AudioControlWebserver(port=port, debug=debugmode)
+        token = config.get("webserver", "authtoken", fallback=None)
+        server = AudioControlWebserver(port=port, authtoken=token, debug=debugmode)
         mpris.register_metadata_display(server)
         server.set_player_control(mpris)
         server.add_updater(mpris)
@@ -231,6 +232,7 @@ def parse_config(debugmode=False):
                 controller = create_object(classname, params)
                 controller.set_player_control(mpris)
                 controller.set_volume_control(volume_control)
+                mpris.register_state_display(controller)
                 controller.start()
                 logging.info("started controller %s", controller)
                 report_activate("audiocontrol_controller_"+classname)
@@ -246,7 +248,7 @@ def parse_config(debugmode=False):
                 metadata_display = create_object(classname, params)
                 mpris.register_metadata_display(metadata_display)
                 volume_control.add_listener(metadata_display)
-                logging.info("registered metadata display %s", controller)
+                logging.info("registered metadata display %s", metadata_display)
                 report_activate("audiocontrol_metadata_"+classname)
             except Exception as e:
                 logging.error("Exception during controller %s initialization",
@@ -348,14 +350,20 @@ def parse_config(debugmode=False):
 
 def main():
 
+    verbose=False
     if len(sys.argv) > 1:
         if "-v" in sys.argv:
-            logging.basicConfig(format='%(levelname)s: %(module)s - %(message)s',
-                                level=logging.DEBUG)
-            logging.debug("enabled verbose logging")
+            verbose=True
+            
+    if verbose:
+        logging.basicConfig(format='%(levelname)s: %(module)s - %(message)s',
+                            level=logging.DEBUG)
+        logging.debug("enabled verbose logging")
     else:
         logging.basicConfig(format='%(levelname)s: %(module)s - %(message)s',
                             level=logging.INFO)
+        logging.info("INFO")
+        logging.error("ERROR")
 
     if ('DEBUG' in os.environ):
         logging.warning("starting in debug mode...")
